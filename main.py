@@ -8,6 +8,7 @@ import math
 import threading
 import json
 import difflib
+import subprocess
 from collections import deque
 import numpy as np
 import sounddevice as sd
@@ -100,11 +101,13 @@ WAKE_WORD_THRESHOLD = 0.5
 VOICE_COMMANDS = [
     "click", "right click", "double click", 
     "scroll up", "scroll down", "screenshot", 
-    "stop listening", "start listening"
+    "stop listening", "start listening",
+    "one", "two", "three"
 ]
 VOSK_MODEL_ZIP = "vosk-model-small-en-us-0.15.zip"
 VOSK_MODEL_DIR = "vosk-model-small-en-us-0.15"
-VOSK_MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+# Fast Hugging Face mirror URL for the Vosk model
+VOSK_MODEL_URL = "https://huggingface.co/grimso/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip"
 
 # =====================================================================
 # OPTIMIZATION PARAMETERS
@@ -186,6 +189,10 @@ class ThreadedCamera:
         self.cap.release()
 
 class AudioProcessor:
+    """
+    Handles background audio stream input, calculates signal strength (RMS),
+    and runs openWakeWord detection on 1280-sample blocks.
+    """
     def __init__(self, model_name="alexa", threshold=0.5, state_dict=None):
         self.model_name = model_name
         self.threshold = threshold
@@ -266,10 +273,19 @@ class AudioProcessor:
 
 def download_vosk_model():
     if not os.path.exists(VOSK_MODEL_DIR):
+        # Self-healing check: delete corrupted/incomplete zip file (if less than 35MB)
+        if os.path.exists(VOSK_MODEL_ZIP) and os.path.getsize(VOSK_MODEL_ZIP) < 35 * 1024 * 1024:
+            print(f"Deleting incomplete zip file of size {os.path.getsize(VOSK_MODEL_ZIP)} bytes.")
+            try:
+                os.remove(VOSK_MODEL_ZIP)
+            except Exception:
+                pass
+                
         if not os.path.exists(VOSK_MODEL_ZIP):
-            print("Downloading small Vosk English model (~40MB)... This may take a few moments.")
+            print("Downloading small Vosk English model (~40MB) from Hugging Face mirror... This may take a few moments.")
             urllib.request.urlretrieve(VOSK_MODEL_URL, VOSK_MODEL_ZIP)
             print("Vosk model download completed.")
+            
         print("Extracting Vosk model...")
         with zipfile.ZipFile(VOSK_MODEL_ZIP, 'r') as zip_ref:
             zip_ref.extractall(".")
@@ -284,6 +300,100 @@ def load_vosk_model_async():
         print("Vosk speech recognition engine loaded successfully in background.")
     except Exception as e:
         print(f"Warning: Failed to load Vosk engine ({e}). Voice commands will not function.")
+
+def launch_app(command_word):
+    """
+    Launches application configured in app_commands.json based on command_word.
+    Supports standard executables (via subprocess.Popen) and UWP schemes (via os.startfile).
+    """
+    if not os.path.exists("app_commands.json"):
+        print("[App Launcher] Error: app_commands.json configuration file not found.", flush=True)
+        return
+
+    try:
+        with open("app_commands.json", "r") as f:
+            commands = json.load(f)
+    except Exception as e:
+        print(f"[App Launcher] Error reading app_commands.json: {e}", flush=True)
+        return
+
+    if command_word not in commands:
+        print(f"[App Launcher] Error: Command '{command_word}' is not configured in app_commands.json.", flush=True)
+        return
+
+    app_info = commands[command_word]
+    app_name = app_info.get("name", "App")
+    app_type = app_info.get("type")
+
+    print(f"[App Launcher] Attempting to launch: {app_name}...", flush=True)
+
+    if app_type == "executable":
+        path = app_info.get("path")
+        try:
+            subprocess.Popen(path)
+            print(f"[App Launcher] Successfully launched {app_name} via Popen.", flush=True)
+        except Exception as e:
+            print(f"[App Launcher] Error: Could not launch {app_name} executable ({path}): {e}", flush=True)
+
+    elif app_type == "uwp_or_exe":
+        protocol = app_info.get("protocol")
+        uwp_registered = False
+        
+        # Check if the UWP protocol is registered in Windows HKEY_CLASSES_ROOT
+        try:
+            import winreg
+            proto_name = protocol.replace(":", "")
+            key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, proto_name)
+            winreg.CloseKey(key)
+            uwp_registered = True
+        except Exception:
+            pass
+
+        if uwp_registered:
+            try:
+                os.startfile(protocol)
+                print(f"[App Launcher] Successfully launched {app_name} (UWP) via os.startfile.", flush=True)
+                return
+            except Exception as e:
+                print(f"[App Launcher] Warning: os.startfile failed for UWP protocol '{protocol}' ({e}). Checking exe paths...", flush=True)
+        else:
+            print(f"[App Launcher] UWP Protocol '{protocol}' not found in registry. Checking standalone exe paths...", flush=True)
+
+        # Standalone executable fallback
+        paths = app_info.get("paths", [])
+        launched = False
+        for p in paths:
+            expanded_path = os.path.expandvars(p)
+            if os.path.exists(expanded_path):
+                try:
+                    subprocess.Popen(expanded_path)
+                    print(f"[App Launcher] Successfully launched standalone {app_name} via {expanded_path}.", flush=True)
+                    launched = True
+                    break
+                except Exception as e:
+                    print(f"[App Launcher] Error attempting launcher at {expanded_path}: {e}", flush=True)
+        
+        if not launched:
+            print(f"[App Launcher] Error: Could not launch {app_name}. Neither UWP scheme '{protocol}' nor executable paths exist.", flush=True)
+
+    elif app_type == "executable_list":
+        paths = app_info.get("paths", [])
+        launched = False
+        for p in paths:
+            expanded_path = os.path.expandvars(p)
+            if os.path.exists(expanded_path):
+                try:
+                    subprocess.Popen(expanded_path)
+                    print(f"[App Launcher] Successfully launched {app_name} via {expanded_path}.", flush=True)
+                    launched = True
+                    break
+                except Exception as e:
+                    print(f"[App Launcher] Error attempting launcher at {expanded_path}: {e}", flush=True)
+        
+        if not launched:
+            print(f"[App Launcher] Error: Could not find {app_name} at any configured paths: {paths}", flush=True)
+    else:
+        print(f"[App Launcher] Error: Unsupported application type '{app_type}' in config.", flush=True)
 
 def process_voice_command(audio_data, state_dict, beep_callback):
     global vosk_model
@@ -320,6 +430,10 @@ def process_voice_command(audio_data, state_dict, beep_callback):
             state_dict['command_match_text'] = f"COMMAND MATCHED: {matched_cmd.upper()}"
             state_dict['command_match_success'] = True
             
+            # Action execution: App Launching check
+            if matched_cmd in ["one", "two", "three"]:
+                launch_app(matched_cmd)
+
             # Play a double success beep
             def double_beep():
                 beep_callback(1200, 100)

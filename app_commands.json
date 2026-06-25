@@ -1,0 +1,40 @@
+{
+    "one": {
+        "name": "File Explorer",
+        "type": "executable",
+        "path": "explorer.exe"
+    },
+    "two": {
+        "name": "WhatsApp",
+        "type": "uwp_or_exe",
+        "protocol": "whatsapp:",
+        "paths": [
+            "%LocalAppData%\\WhatsApp\\WhatsApp.exe",
+            "C:\\Program Files\\WhatsApp\\WhatsApp.exe"
+        ]
+    },
+    "three": {
+        "name": "Brave Browser",
+        "type": "executable_list",
+        "paths": [
+            "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+            "%LocalAppData%\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+        ]
+    },
+    "vscode": {
+        "name": "Visual Studio Code",
+        "type": "executable_list",
+        "paths": [
+            "%LocalAppData%\\Programs\\Microsoft VS Code\\Code.exe",
+            "C:\\Program Files\\Microsoft VS Code\\Code.exe"
+        ]
+    },
+    "calculator": {
+        "name": "Calculator",
+        "type": "uwp_or_exe",
+        "protocol": "calc:",
+        "paths": [
+            "C:\\Windows\\System32\\calc.exe"
+        ]
+    }
+}
