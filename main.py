@@ -102,7 +102,7 @@ VOICE_COMMANDS = [
     "click", "right click", "double click", 
     "scroll up", "scroll down", "screenshot", 
     "stop listening", "start listening",
-    "one", "two", "three"
+    "one", "two", "three", "vscode", "calculator"
 ]
 VOSK_MODEL_ZIP = "vosk-model-small-en-us-0.15.zip"
 VOSK_MODEL_DIR = "vosk-model-small-en-us-0.15"
@@ -431,7 +431,7 @@ def process_voice_command(audio_data, state_dict, beep_callback):
             state_dict['command_match_success'] = True
             
             # Action execution: App Launching check
-            if matched_cmd in ["one", "two", "three"]:
+            if matched_cmd in ["one", "two", "three", "vscode", "calculator"]:
                 launch_app(matched_cmd)
 
             # Play a double success beep
