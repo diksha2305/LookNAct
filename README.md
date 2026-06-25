@@ -39,7 +39,7 @@ graph TD
 2.  **Dual-Resolution Processing**:
     High-resolution frames are captured for the display UI window, while downscaled frames (`320x240`) are fed to MediaPipe for hand landmark extraction. This minimizes latency and keeps CPU utilization low.
 3.  **One Euro Filter Smoothing**:
-    We implement an adaptive first-order low-pass filter in [one_euro_filter.py](file:///d:/Lakshya/Look-N-Act/gesture-cursor/one_euro_filter.py) that adjusts its cutoff frequency dynamically based on hand speed. This eliminates mouse jitter at rest without introducing lag during quick swipes.
+    We implement an adaptive first-order low-pass filter in [one_euro_filter.py](one_euro_filter.py) that adjusts its cutoff frequency dynamically based on hand speed. This eliminates mouse jitter at rest without introducing lag during quick swipes.
 4.  **Velocity-Based Predictive Positioning**:
     To counter pipeline delays (camera capture + inference + display buffers), the system tracks velocity over a sliding window and projects cursor coordinates ahead by `60ms` (configurable).
 5.  **Pinch-to-Click Finite State Machine (FSM)**:
@@ -51,7 +51,7 @@ graph TD
     *   **Speech Recognition**: Uses `vosk-model-small-en-us-0.15` to transcribe 2-second voice audio segments locally.
     *   **Fuzzy Matching**: Matches the transcribed text against a fixed dictionary using `difflib.get_close_matches` with a similarity cutoff of `0.6`.
 8.  **Automated App Launching**:
-    Launches apps from [app_commands.json](file:///d:/Lakshya/Look-N-Act/gesture-cursor/app_commands.json) dynamically, supporting standard paths, custom locations, and UWP Microsoft Store apps via URI schemes (`whatsapp:`).
+    Launches apps from [app_commands.json](app_commands.json) dynamically, supporting standard paths, custom locations, and UWP Microsoft Store apps via URI schemes (`whatsapp:`).
 
 ---
 
@@ -99,7 +99,7 @@ Wake the system by saying **"Alexa"** (an visual white/yellow border flash and b
 
 1.  **Clone or navigate to the project directory**:
     ```cmd
-    cd d:\Lakshya\Look-N-Act\gesture-cursor
+    cd LookNAct
     ```
 
 2.  **Activate the Python Virtual Environment**:
@@ -134,7 +134,7 @@ python main.py
 
 ## ⚙️ Configuration & Tuning
 
-All main configurations are declared at the top of [main.py](file:///d:/Lakshya/Look-N-Act/gesture-cursor/main.py):
+All main configurations are declared at the top of [main.py](main.py):
 
 *   **Active Zone Box (`ACTIVE_MARGIN_X` / `ACTIVE_MARGIN_Y`)**: Sets the boundary margins. Decreasing this enlarges the cursor navigation box.
 *   **MediaPipe Confidence (`DETECTION_CONFIDENCE` / `TRACKING_CONFIDENCE`)**: Lower these under low-lighting environments to prevent tracking dropouts.
