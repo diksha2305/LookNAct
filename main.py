@@ -3,6 +3,7 @@ import time
 import os
 import urllib.request
 import ctypes
+import math
 from collections import deque
 import mediapipe as mp
 from mediapipe.tasks import python
@@ -45,6 +46,15 @@ FILTER_BETA = 0.05
 FILTER_D_CUTOFF = 1.0
 
 # =====================================================================
+# PINCH-TO-CLICK CONFIGURATION
+# =====================================================================
+# Settings for simulated mouse clicks via pinching (thumb + index fingertips):
+# - PINCH_THRESHOLD: Normalized distance threshold. Lower = tighter pinch required.
+# - PINCH_DEBOUNCE_MS: Time (in ms) the pinch must be held to register a click.
+PINCH_THRESHOLD = 0.045
+PINCH_DEBOUNCE_MS = 100
+
+# =====================================================================
 # MODEL CONFIGURATION
 # =====================================================================
 MODEL_PATH = "hand_landmarker.task"
@@ -59,6 +69,16 @@ HAND_CONNECTIONS = [
     (13, 17), (17, 18), (18, 19), (19, 20),# Pinky
     (0, 17)                              # Palm base connection
 ]
+
+# Win32 Mouse Event Flags
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+
+class PinchState:
+    IDLE = "IDLE"
+    PINCH_STARTED = "PINCH_STARTED"
+    PINCH_CONFIRMED = "PINCH_CONFIRMED"
+    RELEASED = "RELEASED"
 
 def download_model():
     if not os.path.exists(MODEL_PATH):
@@ -141,7 +161,11 @@ def main():
     raw_trail = deque(maxlen=trail_maxlen)
     smooth_trail = deque(maxlen=trail_maxlen)
 
-    # State variables
+    # Finite State Machine state variables
+    pinch_state = PinchState.IDLE
+    pinch_start_time = 0.0
+
+    # UI variables
     debug_overlay = False
 
     # Configure Hand Landmarker Options
@@ -202,7 +226,7 @@ def main():
         # Run detection synchronously
         results = detector.detect_for_video(mp_image, timestamp_ms)
 
-        # Draw landmarks, print coordinates, and move cursor
+        # Draw landmarks, process pinch detection, and move cursor
         if results.hand_landmarks:
             for hand_landmarks in results.hand_landmarks:
                 # Convert normalized landmarks to pixel coordinates
@@ -221,11 +245,12 @@ def main():
                 for cx, cy in pixel_landmarks:
                     cv2.circle(frame, (cx, cy), 5, (0, 0, 255), -1)
                 
-                # Move cursor based on index fingertip (landmark 8)
+                # Hand tracking and gesture control logic
                 if len(hand_landmarks) > 8:
+                    thumb_tip = hand_landmarks[4]
                     index_tip = hand_landmarks[8]
                     
-                    # 1. Apply the One Euro Filter to raw coordinates in seconds time-domain
+                    # 1. Apply the One Euro Filter to raw index fingertip coordinates
                     current_time = time.time()
                     smooth_x = filter_x.filter(index_tip.x, current_time)
                     smooth_y = filter_y.filter(index_tip.y, current_time)
@@ -253,8 +278,65 @@ def main():
                     
                     # Update mouse position using low-level Win32 API SetCursorPos
                     user32.SetCursorPos(screen_x, screen_y)
+
+                    # 4. Calculate pinch distance between thumb tip and index tip in 2D normalized space
+                    pinch_dist = math.sqrt((thumb_tip.x - index_tip.x)**2 + (thumb_tip.y - index_tip.y)**2)
+                    is_pinching = pinch_dist < PINCH_THRESHOLD
+                    current_time_ms = time.time() * 1000
+
+                    # 5. Finite State Machine for click actions
+                    if pinch_state == PinchState.IDLE:
+                        if is_pinching:
+                            pinch_state = PinchState.PINCH_STARTED
+                            pinch_start_time = current_time_ms
+
+                    elif pinch_state == PinchState.PINCH_STARTED:
+                        if is_pinching:
+                            if current_time_ms - pinch_start_time >= PINCH_DEBOUNCE_MS:
+                                pinch_state = PinchState.PINCH_CONFIRMED
+                                # Low-level Left Click Down (Press)
+                                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                        else:
+                            pinch_state = PinchState.IDLE
+
+                    elif pinch_state == PinchState.PINCH_CONFIRMED:
+                        if not is_pinching:
+                            pinch_state = PinchState.RELEASED
+                            # Low-level Left Click Up (Release)
+                            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+                    elif pinch_state == PinchState.RELEASED:
+                        pinch_state = PinchState.IDLE
+
+                    # Draw pinch-to-click visual guide
+                    thumb_pixel = pixel_landmarks[4]
+                    index_pixel = pixel_landmarks[8]
+                    
+                    # Color indicator for lines depending on pinch status
+                    if pinch_state == PinchState.PINCH_CONFIRMED:
+                        line_color = (0, 255, 0)  # Green for active click
+                    elif pinch_state == PinchState.PINCH_STARTED:
+                        line_color = (0, 165, 255)  # Orange for debouncing
+                    else:
+                        line_color = (0, 0, 255)  # Red for no pinch
+                    
+                    cv2.line(frame, thumb_pixel, index_pixel, line_color, 2)
+                    cv2.circle(frame, thumb_pixel, 6, line_color, -1)
+                    cv2.circle(frame, index_pixel, 6, line_color, -1)
+                    
+                    # Draw pinch feedback text
+                    cv2.putText(frame, f"Click State: {pinch_state}", (10, 60), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+                    cv2.putText(frame, f"Pinch Distance: {pinch_dist:.3f} (Threshold: {PINCH_THRESHOLD})", (10, 80), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         else:
-            # Reset filters and trails if hand is lost to prevent jump spikes on reappearance
+            # Safety checks & resets when hand is lost
+            if pinch_state == PinchState.PINCH_CONFIRMED:
+                # Always release left mouse click if hand disappears
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                print("Pinch Click: Safety Release (Hand Lost)")
+            
+            pinch_state = PinchState.IDLE
             filter_x.x_prev = None
             filter_x.t_prev = None
             filter_y.x_prev = None
